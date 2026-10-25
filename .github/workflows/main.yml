@@ -1,56 +1,93 @@
 
-name: Build TNT V2.9 APK
+package com.tnt.v29;
 
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+import android.app.Service;
+import android.content.Intent;
+import android.graphics.Color;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.PixelFormat;
+import android.os.Build;
+import android.os.IBinder;
+import android.view.Gravity;
+import android.view.View;
+import android.view.WindowManager;
 
-permissions:
-  contents: read
+public class AimOverlayService extends Service {
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+    private WindowManager windowManager;
+    private AimView aimView;
 
-    steps:
-      - name: Baixar projeto
-        uses: actions/checkout@v4
+    @Override
+    public void onCreate() {
+        super.onCreate();
 
-      - name: Configurar Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
+        windowManager = (WindowManager)
+                getSystemService(WINDOW_SERVICE);
 
-      - name: Extrair ZIP
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip
-          unzip -o TNT-V2.9-Android-GitHub.zip -d extracted
-          find extracted -type f \( -name settings.gradle -o -name settings.gradle.kts \)
+        aimView = new AimView();
 
-      - name: Localizar projeto Android
-        run: |
-          FILE=$(find extracted -type f \( -name settings.gradle -o -name settings.gradle.kts \) | head -n 1)
-          if [ -z "$FILE" ]; then
-            echo "ERRO: o ZIP não contém um projeto Gradle Android reconhecível."
-            exit 1
-          fi
-          echo "PROJECT_DIR=$(dirname "$FILE")" >> "$GITHUB_ENV"
+        int windowType = Build.VERSION.SDK_INT >= 26
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                : WindowManager.LayoutParams.TYPE_PHONE;
 
-      - name: Configurar Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
+        WindowManager.LayoutParams params =
+                new WindowManager.LayoutParams(
+                        WindowManager.LayoutParams.MATCH_PARENT,
+                        WindowManager.LayoutParams.MATCH_PARENT,
+                        windowType,
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        PixelFormat.TRANSLUCENT);
 
-      - name: Compilar APK
-        run: gradle -p "$PROJECT_DIR" assembleDebug
+        params.gravity = Gravity.TOP | Gravity.START;
+        windowManager.addView(aimView, params);
+    }
 
-      - name: Disponibilizar APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: TNT-V2.9-APK
-          path: extracted/**/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        return START_NOT_STICKY;
+    }
+
+    @Override
+    public void onDestroy() {
+        if (windowManager != null && aimView != null) {
+            windowManager.removeView(aimView);
+        }
+        super.onDestroy();
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
+
+    private class AimView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        AimView() {
+            super(AimOverlayService.this);
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+
+            float x = getWidth() / 2f;
+            float y = getHeight() / 2f;
+            float size = 24f;
+
+            paint.setColor(Color.GREEN);
+            paint.setStrokeWidth(4f);
+            paint.setStyle(Paint.Style.STROKE);
+
+            canvas.drawCircle(x, y, size, paint);
+            canvas.drawLine(x - size - 10, y,
+                    x + size + 10, y, paint);
+            canvas.drawLine(x, y - size - 10,
+                    x, y + size + 10, paint);
+        }
+    }
+}
